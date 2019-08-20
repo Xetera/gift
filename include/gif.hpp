@@ -2,9 +2,10 @@
 
 #include <fstream>
 #include <functional>
-#include <vector>
-#include <memory>
 #include <list>
+#include <memory>
+#include <vector>
+#include <optional>
 
 namespace gif {
 
@@ -21,11 +22,17 @@ struct Header {
    * This one is probably not going to change
    */
   char version[3];
-  explicit Header(std::ifstream &);
+  explicit Header(std::ifstream&);
 };
 
 struct Descriptor {
+  /**
+   * width, up to 65,535px
+   */
   unsigned short width;
+  /**
+   * height, up to 65,535px
+   */
   unsigned short height;
   unsigned char bgColorIndex;
   unsigned char pixelAspectRatio;
@@ -36,7 +43,7 @@ struct Descriptor {
   unsigned char colorResolution;
   unsigned char sortFlag;
   unsigned char colorTableSize;
-  explicit Descriptor(std::ifstream &);
+  explicit Descriptor(std::ifstream&);
 };
 
 struct Color {
@@ -60,14 +67,21 @@ struct GraphicsControl {
   unsigned char disposalMethod;
   unsigned char userInput;
   unsigned char transparentColor;
+  unsigned char delayTime;
+  unsigned char transparentColorIndex;
+};
+
+struct ImageDescriptor {
+  
 };
 
 struct Image {
   Header header;
   Descriptor descriptor;
+  std::optional<gif::GlobalColorTable> globalColorTable;
+  GraphicsControl graphicsControl;
 };
-
 
 }  // namespace gif
 
-std::ifstream readGifRaw(const std::string &);
+std::ifstream readGifRaw(const std::string&);

@@ -1,11 +1,5 @@
-#include <cstring>
 #include <bitset>
-#include "parser.hpp"
 #include "gif.hpp"
-
-//void readStream(unsigned char* e, int toRead, std::ifstream &stream) {
-//  stream.read(reinterpret_cast<char *>(e), toRead);
-//}
 
 gif::Header::Header(std::ifstream &stream) {
   stream.read(this->signature, 3);
@@ -20,8 +14,7 @@ gif::Header::Header(std::ifstream &stream) {
 gif::Descriptor::Descriptor(std::ifstream &stream) {
   stream.read(reinterpret_cast<char *>(&width), 2);
   stream.read(reinterpret_cast<char *>(&height), 2);
-  unsigned char packed;
-  stream.read(reinterpret_cast<char *>(&packed), 1);
+  unsigned char packed = stream.get();
   globalColorTable = packed & 0b10000000u;
   colorResolution = packed & 0b01110000u;
   sortFlag = packed & 0b00001000u;
@@ -37,16 +30,13 @@ gif::GlobalColorTable::GlobalColorTable(unsigned char count, std::ifstream &stre
   }
   const int consumeAmount = READ_PER_COLOR << (count + 1);
   const int colorCount = consumeAmount / READ_PER_COLOR;
-  color.reserve(colorCount);
+  colors.reserve(colorCount);
   for (int i = 0; i < colorCount; i++) {
-    unsigned char r;
-    stream.read(reinterpret_cast<char *>(&r), 1);
-    unsigned char g;
-    stream.read(reinterpret_cast<char *>(&g), 1);
-    unsigned char b;
-    stream.read(reinterpret_cast<char *>(&b), 1);
-//    unsigned int colors[3] = { r, g, b };
-    color.push_back({ r, g, b });
+    unsigned char r = stream.get();
+    unsigned char g = stream.get();
+    unsigned char b = stream.get();
+    const auto currentColor = Color{.red = r, .green = g, .blue = b};
+    colors.push_back(currentColor);
   }
   auto q = 1;
 }

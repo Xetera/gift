@@ -39,9 +39,27 @@ struct Descriptor {
   explicit Descriptor(std::ifstream &);
 };
 
+struct Color {
+  unsigned char red;
+  unsigned char green;
+  unsigned char blue;
+};
+
 struct GlobalColorTable {
-  std::vector<unsigned char[3]> color;
+  std::vector<Color> colors;
   explicit GlobalColorTable(unsigned char, std::ifstream&);
+};
+
+/**
+ * All graphics control extensions
+ * begin with   | 21 F9
+ * and end with | 00
+ */
+struct GraphicsControl {
+  unsigned char byteSize;
+  unsigned char disposalMethod;
+  unsigned char userInput;
+  unsigned char transparentColor;
 };
 
 struct Image {

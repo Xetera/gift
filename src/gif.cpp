@@ -1,16 +1,14 @@
 #include "gif.hpp"
-#include <fstream>
 #include <functional>
 #include <iostream>
-#include <iterator>
 #include <memory>
-#include <parser.hpp>
+#include "parser.hpp"
 
-void writeGif(const std::string &name, const gif::Image &gif) {
-  const auto bytes = gif.header.version;  // + gif.descriptor;
-  std::ofstream fstream(name, std::ios_base::binary);
-  fstream << bytes;
-}
+//void writeGif(const std::string &name, const gif::ImageMetadata &gif) {
+//  const auto bytes = gif.header.version;  // + gif.descriptor;
+//  std::ofstream fstream(name, std::ios_base::binary);
+//  fstream << bytes;
+//}
 
 std::ifstream readGifRaw(const std::string &file) {
   std::ifstream fs(file, std::ios::binary);
@@ -21,9 +19,18 @@ std::ifstream readGifRaw(const std::string &file) {
 }
 
 int main() {
-  auto stream = readGifRaw("./newgame.gif");
+  auto stream = readGifRaw("./chino.gif");
   const auto header = gif::Header(stream);
   const auto descriptor = gif::Descriptor(stream);
-  const auto table = gif::GlobalColorTable(descriptor.colorTableSize, stream);
-  std::cout << header.signature;
+  const auto hasTable = hasColorTable(stream);
+  const std::optional<gif::ColorTable> globalColorTable = hasTable
+    ? std::make_optional( gif::ColorTable(descriptor.colorTableSize, stream))
+    : std::nullopt;
+  const auto graphicsControl = gif::GraphicsControl(stream);
+  const auto imageDescriptor = gif::ImageDescriptor(stream);
+  const std::optional<gif::ColorTable> localColorTable = imageDescriptor.haslocalColorTable
+    ? std::make_optional(gif::ColorTable(imageDescriptor.localColorTableSize, stream))
+    : std::nullopt;
+  const auto imageData = gif::CompressedImageData(stream);
+  consumeLabel<gif::TRAILER>(stream);
 }

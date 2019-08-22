@@ -17,6 +17,7 @@ IncludeBlocks: Merge
 IndentWrappedFunctionNames: false
 CommentPragmas: "^ TODO:"
 SortIncludes: true
+DerivePointerAlignment: true
 SortUsingDeclarations: true
 SpaceAfterCStyleCast: true
 SpaceBeforeAssignmentOperators: true

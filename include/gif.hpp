@@ -4,15 +4,18 @@
 #include <fstream>
 #include <functional>
 #include <list>
-#include <memory>
 #include <optional>
+#include <utility>
+#include <variant>
 #include <vector>
-#include "parser.hpp"
+#include "typedefs.hpp"
 
 namespace gif {
-constexpr unsigned char EXTENSION_INTRODUCER = 0x21;
-constexpr unsigned char BLOCK_TERMINATOR     = 0x00;
-constexpr unsigned char TRAILER              = 0x3B;
+constexpr uint8_t EXTENSION_INTRODUCER = 0x21;
+constexpr uint8_t BLOCK_TERMINATOR     = 0x00;
+constexpr uint8_t TRAILER              = 0x3B;
+
+struct Extension {};
 
 enum class Version { _89a, _87a };
 
@@ -22,39 +25,39 @@ enum class Version { _89a, _87a };
  */
 struct Header {
   Version version;
-
   explicit Header(std::ifstream &);
 };
 
-struct Descriptor {
+struct ScreenDescriptor {
   /**
    * width, up to 65,535px
    */
-  unsigned short width;
+  uint16_t width;
   /**
    * height, up to 65,535px
    */
-  unsigned short height;
-  unsigned char bgColorIndex;
-  unsigned char pixelAspectRatio;
+  uint16_t height;
+  uint8_t bgColorIndex;
+  uint8_t pixelAspectRatio;
+  uint8_t colorResolution;
+  uint8_t colorTableSize;
   /**
    * Extracted from the packed bit
    */
-  unsigned char globalColorTable;
-  unsigned char colorResolution;
-  unsigned char sortFlag;
-  unsigned char colorTableSize;
-
-  explicit Descriptor(std::ifstream &);
+  bool hasGlobalColorTable;
+  bool isSorted;
+  explicit ScreenDescriptor(std::ifstream &);
 };
 
 /**
  * 3 byte color block extracted from [gif::ColorTable]
  */
 struct Color {
-  unsigned char red;
-  unsigned char green;
-  unsigned char blue;
+  uint8_t red;
+  uint8_t green;
+  uint8_t blue;
+  explicit Color(uint8_t red, uint8_t blue, uint8_t green)
+      : red(red), green(green), blue(blue) {}
 };
 
 /**
@@ -63,7 +66,6 @@ struct Color {
  */
 struct ColorTable {
   std::vector<Color> colors;
-
   explicit ColorTable(unsigned char, std::ifstream &);
 };
 
@@ -74,15 +76,14 @@ struct ColorTable {
  * to have parsed the following labels.
  * | 21 F9 |.
  */
-struct GraphicsControl {
-  static constexpr unsigned char LABEL = 0xF9;
-  unsigned char byteSize;
-  unsigned char disposalMethod;
-  unsigned char userInput;
-  unsigned char transparentColor;
-  unsigned char delayTime;
-  unsigned char transparentColorIndex;
-
+struct GraphicsControl : Extension {
+  static constexpr uint8_t LABEL = 0xF9;
+  uint8_t byteSize;
+  uint8_t disposalMethod;
+  uint8_t userInput;
+  uint8_t transparentColor;
+  uint8_t delayTime;
+  uint8_t transparentColorIndex;
   explicit GraphicsControl(std::ifstream &);
 };
 
@@ -90,16 +91,15 @@ struct GraphicsControl {
  * A descriptor for a single image
  */
 struct ImageDescriptor {
-  static constexpr char SEPARATOR = 0x2C;
-  unsigned short left;
-  unsigned short top;
-  unsigned short width;
-  unsigned short height;
-  unsigned char haslocalColorTable;
-  unsigned char isInterlacing;
-  unsigned char isSorted;
-  unsigned char localColorTableSize;
-
+  static constexpr uint8_t SEPARATOR = 0x2C;
+  uint16_t left;
+  uint16_t top;
+  uint16_t width;
+  uint16_t height;
+  bool haslocalColorTable;
+  bool isInterlacing;
+  bool isSorted;
+  uint8_t localColorTableSize;
   explicit ImageDescriptor(std::ifstream &);
 };
 
@@ -107,19 +107,16 @@ struct ImageDescriptor {
  * Chunks of image data found in the [gif::ImageData] block
  */
 struct ImageSubData {
-  unsigned char byteCount;
-  std::vector<unsigned char> imageBytes;
-
-  explicit ImageSubData(unsigned char, std::vector<unsigned char> &);
+  std::vector<uint8_t> imageBytes;
+  explicit ImageSubData(std::vector<unsigned char> &);
 };
 
 /**
  * LZW compressed image data of the gif
  */
 struct CompressedImageData {
-  unsigned char minimumCodeSize;
+  uint8_t minimumCodeSize;
   std::vector<gif::ImageSubData> subBlocks;
-
   explicit CompressedImageData(std::ifstream &);
 };
 
@@ -127,45 +124,79 @@ struct CompressedImageData {
  * Decompressed GIF image data
  */
 struct DecompressedImageData {
-  unsigned char minimumCodeSize;
+  uint8_t minimumCodeSize;
   std::vector<gif::ImageSubData> subBlocks;
-
   //  explicit CompressedImageData(std::ifstream&);
 };
 
-struct ApplicationExtension {
-
+// nobody cares about this, just skipping it for now
+struct PlainTextExtension {
+  static constexpr uint8_t LABEL      = 0x01;
+  static constexpr uint8_t BLOCK_SIZE = 0x0C;
+  explicit PlainTextExtension(std::ifstream &);
 };
 
+struct ApplicationExtension {
+  static constexpr uint8_t LABEL                    = 0xFF;
+  static constexpr uint16_t APPLICATION_DATA_LENGTH = 0x0B;
+  // Typically just "NETSCAPE2.0"
+  UChars<APPLICATION_DATA_LENGTH> applicationData;
+  uint16_t loopCount;
+  explicit ApplicationExtension(std::ifstream &);
+};
+
+struct CommentExtension {
+  static constexpr uint8_t LABEL = 0xFE;
+  std::vector<std::string> comments;
+  explicit CommentExtension(std::ifstream &);
+};
+
+using OptionalColorTable = std::optional<ColorTable>;
+
+struct Frame {
+  ImageDescriptor imageDescriptor;
+  OptionalColorTable colorTable;
+  CompressedImageData imageData;
+  explicit Frame(const ImageDescriptor &descriptor,
+                 const OptionalColorTable &colorTable,
+                 const CompressedImageData &data)
+      : imageDescriptor(descriptor), colorTable(colorTable), imageData(data){};
+};
+
+using FrameData = std::variant<Frame, PlainTextExtension>;
+
+struct ImageBlock {
+  std::optional<GraphicsControl> graphicsControl;
+  FrameData frameData;
+  explicit ImageBlock(std::ifstream &);
+};
+
+using ImageBody =
+    std::variant<ImageBlock, ApplicationExtension, CommentExtension>;
 /**
  * The metadata of a GIF
  */
 struct ImageMetadata {
   Header header;
-  Descriptor descriptor;
-  std::optional<gif::ColorTable> globalColorTable;
-  GraphicsControl graphicsControl;
-  ImageDescriptor imageDescriptor;
-  std::optional<gif::ColorTable> localColorTable;
-
-  /**
-   * Reading images from the filesystem
-   * @param path
-   */
-  explicit ImageMetadata(const std::filesystem::path &);
+  ScreenDescriptor descriptor;
+  OptionalColorTable globalColorTable;
+  explicit ImageMetadata(const Header &header,
+                         const ScreenDescriptor &descriptor,
+                         const OptionalColorTable &table)
+      : header(header), descriptor(descriptor), globalColorTable(table) {}
 };
 
 struct CompressedImage {
   ImageMetadata metadata;
-  CompressedImageData compressedImageData;
-
-  explicit CompressedImage(const ImageMetadata &);
+  std::vector<ImageBody> compressedImageData;
+  explicit CompressedImage(const ImageMetadata &meta,
+                           const std::vector<ImageBody> &body)
+      : metadata(meta), compressedImageData(body) {}
 };
 
 struct DecompressedImage {
   ImageMetadata metadata;
   DecompressedImageData decompressedImageData;
-
   explicit DecompressedImage(const ImageMetadata &);
 };
 }  // namespace gif

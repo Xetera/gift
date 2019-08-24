@@ -1,11 +1,62 @@
+#include "parser.hpp"
 #include <bitset>
-#include <parser.hpp>
 #include "gif.hpp"
+#include "typedefs.hpp"
 
 using std::ifstream;
 
+void peekN(char *data, int length, std::ifstream &stream) {
+  const auto position = stream.tellg();
+  stream.read(data, length);
+  stream.seekg(position);
+}
+
+std::vector<gif::ImageBody> parseBody(gif::ImageMetadata &meta,
+                                      std::ifstream &stream) {
+  const uint8_t firstByte  = stream.get();
+  const auto isInvalidByte = firstByte != gif::EXTENSION_INTRODUCER &&
+                             firstByte != gif::ImageDescriptor::SEPARATOR;
+  if(firstByte == gif::TRAILER) {
+    return std::vector<gif::ImageBody>();
+  } else if(isInvalidByte) {
+    throw std::runtime_error("Got unexpected value " +
+                             std::to_string(firstByte));
+  }
+  const uint8_t label = stream.peek();
+  if(label == gif::ApplicationExtension::LABEL) {
+    gif::ImageBody app_ = gif::ApplicationExtension(stream);
+    auto out            = parseBody(meta, stream);
+    out.push_back(app_);
+    return out;
+  } else if(label == gif::CommentExtension::LABEL) {
+    gif::ImageBody comment = gif::CommentExtension(stream);
+    auto out               = parseBody(meta, stream);
+    out.push_back(comment);
+    return out;
+  }
+  gif::ImageBody block = gif::ImageBlock(stream);
+  auto out             = parseBody(meta, stream);
+  out.push_back(block);
+  return out;
+}
+
+gif::CompressedImage parseGif(std::ifstream &stream) {
+  gif::Header header(stream);
+  gif::ScreenDescriptor descriptor(stream);
+  const auto hasTable = hasColorTable(stream);
+  gif::OptionalColorTable globalColorTable =
+      hasTable ? std::make_optional(
+                     gif::ColorTable(descriptor.colorTableSize, stream))
+               : std::nullopt;
+
+  gif::ImageMetadata meta(header, descriptor, globalColorTable);
+
+  const auto body = parseBody(meta, stream);
+  return gif::CompressedImage(meta, body);
+};
+
 void withSubBlocks(ifstream &stream,
-                   const std::function<void(UCharsVec &, unsigned char)> &f) {
+                   const std::function<void(UCharsVec &)> &f) {
   unsigned char blockCount;
   while(((blockCount = stream.get()) != gif::BLOCK_TERMINATOR)) {
     UCharsVec byteChunks;
@@ -13,14 +64,7 @@ void withSubBlocks(ifstream &stream,
     for(int i = 0; i < blockCount; i++) {
       byteChunks.emplace_back(stream.get());
     }
-    f(byteChunks, blockCount);
-  }
-}
-void consumeExtIntroducer(ifstream &stream) {
-  const unsigned char extIntroducer = stream.get();
-  if(extIntroducer != gif::EXTENSION_INTRODUCER) {
-    throw std::runtime_error(
-        "Extension block does not start with valid identifier");
+    f(byteChunks);
   }
 }
 
@@ -29,29 +73,27 @@ bool hasColorTable(ifstream &stream) {
   constexpr UChars<BIT_LENGTH> TARGET_BITS = { gif::EXTENSION_INTRODUCER,
                                                gif::GraphicsControl::LABEL };
   UChars<BIT_LENGTH> bits{};
-  const auto position = stream.tellg();
-  stream.read((char *) bits.data(), BIT_LENGTH);
-  stream.seekg(position);
+  peekN((char *) bits.data(), BIT_LENGTH, stream);
   return bits != TARGET_BITS;
 }
 
 gif::Header::Header(ifstream &stream) {
-  static constexpr int SIGNATURE_LENGTH                    = 3;
-  static constexpr int VERSION_LENGTH                      = 3;
-  static constexpr const Chars<VERSION_LENGTH> _89a        = { '8', '9', 'a' };
-  static constexpr const Chars<VERSION_LENGTH> _87a        = { '8', '7', 'a' };
-  static constexpr Chars<SIGNATURE_LENGTH> VALID_SIGNATURE = { 'G', 'I', 'F' };
+  static constexpr int SIGNATURE_LENGTH                     = 3;
+  static constexpr int VERSION_LENGTH                       = 3;
+  static constexpr const UChars<VERSION_LENGTH> _89a        = { '8', '9', 'a' };
+  static constexpr const UChars<VERSION_LENGTH> _87a        = { '8', '7', 'a' };
+  static constexpr UChars<SIGNATURE_LENGTH> VALID_SIGNATURE = { 'G', 'I', 'F' };
 
-  Chars<SIGNATURE_LENGTH> signature{};
-  stream.read(signature.data(), SIGNATURE_LENGTH);
+  UChars<SIGNATURE_LENGTH> signature{};
+  stream.read((char *) signature.data(), SIGNATURE_LENGTH);
   const auto isValidGif = VALID_SIGNATURE == signature;
 
   if(!isValidGif) {
     throw std::runtime_error("File is not a gif");
   }
 
-  Chars<VERSION_LENGTH> versionBuf{};
-  stream.read(versionBuf.data(), VERSION_LENGTH);
+  UChars<VERSION_LENGTH> versionBuf{};
+  stream.read((char *) versionBuf.data(), VERSION_LENGTH);
 
   if(versionBuf == _87a) {
     version = gif::Version::_87a;
@@ -64,37 +106,63 @@ gif::Header::Header(ifstream &stream) {
   }
 }
 
-gif::Descriptor::Descriptor(ifstream &stream) {
+gif::FrameData getFrameData(ifstream &stream) {
+  const uint8_t initial = stream.peek();
+  const auto isImage    = initial == gif::ImageDescriptor::SEPARATOR;
+  if(isImage) {
+    gif::ImageDescriptor descriptor(stream);
+    std::optional<gif::ColorTable> localTable =
+        descriptor.haslocalColorTable
+            ? std::make_optional(
+                  gif::ColorTable(descriptor.localColorTableSize, stream))
+            : std::nullopt;
+    gif::CompressedImageData data(stream);
+    return gif::Frame(descriptor, localTable, data);
+  }
+  return gif::PlainTextExtension(stream);
+}
+
+gif::PlainTextExtension::PlainTextExtension(ifstream &stream) {
+  stream.ignore(BLOCK_SIZE + 2);
+  stream.ignore(BLOCK_SIZE, gif::BLOCK_TERMINATOR);
+}
+
+gif::ImageBlock::ImageBlock(std::ifstream &stream)
+    : graphicsControl(
+          tryParseOptionalExtension<gif::GraphicsControl,
+                                    gif::GraphicsControl::LABEL>(stream)),
+      frameData(getFrameData(stream)) {}
+
+gif::ScreenDescriptor::ScreenDescriptor(ifstream &stream) {
   stream.read((char *) (&width), 2);
   stream.read((char *) (&height), 2);
-  unsigned char packed = stream.get();
-  globalColorTable     = packed & 0b1u;
-  colorResolution      = packed & 0b0111u;
-  sortFlag             = packed & 0b00001u;
-  colorTableSize       = packed & 0b00000111u;
-  bgColorIndex         = stream.get();
-  pixelAspectRatio     = stream.get();
+  uint8_t packed      = stream.get();
+  hasGlobalColorTable = packed & 0b1u;
+  colorResolution     = packed & 0b0111u;
+  isSorted            = packed & 0b00001u;
+  colorTableSize      = packed & 0b00000111u;
+  bgColorIndex        = stream.get();
+  pixelAspectRatio    = stream.get();
 }
 
 gif::ColorTable::ColorTable(unsigned char count, ifstream &stream) {
   constexpr auto BYTE_PER_COLOR = 3;
   if(count < 0) {
-    throw std::runtime_error("Invalid count for color table: " +
-                             std::to_string(count));
+    const auto countStr = std::to_string(count);
+    throw std::runtime_error("Invalid count for color table: " + countStr);
   }
   const int consumeAmount = BYTE_PER_COLOR << (count + 1u);
   const int colorCount    = consumeAmount / BYTE_PER_COLOR;
   colors.reserve(colorCount);
   for(int i = 0; i < colorCount; i++) {
-    const unsigned char r = stream.get();
-    const unsigned char g = stream.get();
-    const unsigned char b = stream.get();
-    colors.emplace_back(Color{ r, g, b });
+    const uint8_t r = stream.get();
+    const uint8_t g = stream.get();
+    const uint8_t b = stream.get();
+    colors.emplace_back(r, g, b);
   }
 }
 
 gif::GraphicsControl::GraphicsControl(ifstream &stream) {
-  consumeExtIntroducer(stream);
   consumeLabel<gif::GraphicsControl::LABEL>(stream);
   byteSize                   = stream.get();
   const unsigned char packed = stream.get();
@@ -120,8 +188,7 @@ gif::ImageDescriptor::ImageDescriptor(ifstream &stream) {
   localColorTableSize  = packed & 0b00000111u;
 }
 
-gif::ImageSubData::ImageSubData(unsigned char count, UCharsVec &bytes)
-    : byteCount(count), imageBytes(bytes) {}
+gif::ImageSubData::ImageSubData(UCharsVec &bytes) : imageBytes(bytes) {}
 
 gif::CompressedImageData::CompressedImageData(ifstream &stream) {
   constexpr unsigned char AVERAGE_SUB_BLOCK_SIZE = 8;
@@ -131,8 +198,25 @@ gif::CompressedImageData::CompressedImageData(ifstream &stream) {
   // Just guessing the sizes here, the average block is likely larger
   // than just 8 bytes but it doesn't really matter
   subBlocks.reserve(minimumCodeSize * AVERAGE_SUB_BLOCK_SIZE);
-  withSubBlocks(stream, [this](auto &byteChunks, auto blockCount) {
-    const auto subData = ImageSubData(blockCount, byteChunks);
-    subBlocks.emplace_back(subData);
+  withSubBlocks(
+      stream, [this](auto &byteChunks) { subBlocks.emplace_back(byteChunks); });
+}
+
+gif::ApplicationExtension::ApplicationExtension(std::ifstream &stream) {
+  consumeLabel<ApplicationExtension::LABEL>(stream);
+  // I think this data length is not variable but then... why does it even
+  // take up a byte in the first place? it's all very weird. GIF is weird...
+  consumeLabel<ApplicationExtension::APPLICATION_DATA_LENGTH>(stream);
+  stream.read((char *) applicationData.data(), APPLICATION_DATA_LENGTH);
+  // I have no idea if these are constant
+  consumeLabel<0x03>(stream);
+  consumeLabel<0x01>(stream);
+  stream.read((char *) (&loopCount), 2);
+  consumeLabel<gif::BLOCK_TERMINATOR>(stream);
+}
+
+gif::CommentExtension::CommentExtension(std::ifstream &stream) {
+  withSubBlocks(stream, [this](const auto &letters) {
+    comments.emplace_back(letters.begin(), letters.end());
   });
 }

@@ -4,6 +4,6 @@ set(CMAKE_CXX_STANDARD 17)
 
 file (GLOB CPP_FILES src/*.cpp)
 
-set(SOURCE_FILES ${CPP_FILES})
+set(SOURCE_FILES ${CPP_FILES} include/typedefs.hpp)
 include_directories(include)
 add_executable(gift ${SOURCE_FILES})

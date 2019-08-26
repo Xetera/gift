@@ -5,7 +5,7 @@
 #include <functional>
 #include "gif.hpp"
 
-gif::CompressedImage parseGif(std::ifstream &);
+gif::Image parseGif(std::ifstream &);
 
 std::vector<gif::ImageBody> parseBody(gif::ImageMetadata &, std::ifstream &);
 

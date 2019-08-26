@@ -1,5 +1,7 @@
 #include "parser.hpp"
 #include <bitset>
+#include <utility>
+#include <decompressor.hpp>
 #include "gif.hpp"
 #include "typedefs.hpp"
 
@@ -40,7 +42,7 @@ std::vector<gif::ImageBody> parseBody(gif::ImageMetadata &meta,
   return out;
 }
 
-gif::CompressedImage parseGif(std::ifstream &stream) {
+gif::Image parseGif(std::ifstream &stream) {
   gif::Header header(stream);
   gif::ScreenDescriptor descriptor(stream);
   const auto hasTable = hasColorTable(stream);
@@ -52,7 +54,7 @@ gif::CompressedImage parseGif(std::ifstream &stream) {
   gif::ImageMetadata meta(header, descriptor, globalColorTable);
 
   const auto body = parseBody(meta, stream);
-  return gif::CompressedImage(meta, body);
+  return gif::Image(meta, body);
 };
 
 void withSubBlocks(ifstream &stream,
@@ -117,7 +119,9 @@ gif::FrameData getFrameData(ifstream &stream) {
                   gif::ColorTable(descriptor.localColorTableSize, stream))
             : std::nullopt;
     gif::CompressedImageData data(stream);
-    return gif::Frame(descriptor, localTable, data);
+    decompress(data);
+    /// decompress here
+    return gif::Frame{ descriptor, localTable };
   }
   return gif::PlainTextExtension(stream);
 }
@@ -188,11 +192,9 @@ gif::ImageDescriptor::ImageDescriptor(ifstream &stream) {
   localColorTableSize  = packed & 0b00000111u;
 }
 
-gif::ImageSubData::ImageSubData(UCharsVec &bytes) : imageBytes(bytes) {}
-
 gif::CompressedImageData::CompressedImageData(ifstream &stream) {
-  constexpr unsigned char AVERAGE_SUB_BLOCK_SIZE = 8;
-  minimumCodeSize                                = stream.get();
+  constexpr uint8_t AVERAGE_SUB_BLOCK_SIZE = 8;
+  minimumCodeSize                          = stream.get();
   // The size of the following sub-blocks aren't known before parsing.
   // Chances are the sub-blocks aren't just going to be empty
   // Just guessing the sizes here, the average block is likely larger

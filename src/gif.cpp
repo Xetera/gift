@@ -2,6 +2,8 @@
 #include <functional>
 #include <iostream>
 #include <memory>
+#include <vector>
+#include <decompressor.hpp>
 #include "parser.hpp"
 
 std::ifstream readGifRaw(const std::string &file) {
@@ -13,8 +15,11 @@ std::ifstream readGifRaw(const std::string &file) {
 }
 
 int main() {
-  auto stream = readGifRaw("./chino.gif");
+  auto stream = readGifRaw("./sample_1.gif");
   const auto gif = parseGif(stream);
+  const std::string s = "banana_bandana";
+  std::vector<uint8_t> e(s.begin(), s.end());
+  compress(s);
   auto q = 1+1;
 //  const auto header = gif::Header(stream);
 //
@@ -28,7 +33,7 @@ int main() {
 //  const std::optional<gif::ColorTable> localColorTable = imageDescriptor.haslocalColorTable
 //    ? std::make_optional(gif::ColorTable(imageDescriptor.localColorTableSize, stream))
 //    : std::nullopt;
-//  const auto imageData = gif::CompressedImageData(stream);
+//  const auto imageData = gif::ImageData(stream);
 //  consumeLabel<gif::TRAILER>(stream);
 }
 

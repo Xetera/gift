@@ -2,4 +2,7 @@
 
 #include "gif.hpp"
 
-gif::DecompressedImage decompress(const gif::CompressedImage&);
+std::vector<gif::ImageBlock> extractFrames(const std::vector<gif::ImageBody>&);
+
+std::vector<uint8_t> compress(const std::string&);
+void decompress(const gif::CompressedImageData&);

@@ -15,8 +15,6 @@ constexpr uint8_t EXTENSION_INTRODUCER = 0x21;
 constexpr uint8_t BLOCK_TERMINATOR     = 0x00;
 constexpr uint8_t TRAILER              = 0x3B;
 
-struct Extension {};
-
 enum class Version { _89a, _87a };
 
 /**
@@ -76,7 +74,7 @@ struct ColorTable {
  * to have parsed the following labels.
  * | 21 F9 |.
  */
-struct GraphicsControl : Extension {
+struct GraphicsControl {
   static constexpr uint8_t LABEL = 0xF9;
   uint8_t byteSize;
   uint8_t disposalMethod;
@@ -104,19 +102,11 @@ struct ImageDescriptor {
 };
 
 /**
- * Chunks of image data found in the [gif::ImageData] block
- */
-struct ImageSubData {
-  std::vector<uint8_t> imageBytes;
-  explicit ImageSubData(std::vector<unsigned char> &);
-};
-
-/**
  * LZW compressed image data of the gif
  */
 struct CompressedImageData {
   uint8_t minimumCodeSize;
-  std::vector<gif::ImageSubData> subBlocks;
+  std::vector<UCharsVec> subBlocks;
   explicit CompressedImageData(std::ifstream &);
 };
 
@@ -125,8 +115,8 @@ struct CompressedImageData {
  */
 struct DecompressedImageData {
   uint8_t minimumCodeSize;
-  std::vector<gif::ImageSubData> subBlocks;
-  //  explicit CompressedImageData(std::ifstream&);
+  std::vector<UCharsVec> subBlocks;
+  //  explicit ImageData(std::ifstream&);
 };
 
 // nobody cares about this, just skipping it for now
@@ -156,11 +146,7 @@ using OptionalColorTable = std::optional<ColorTable>;
 struct Frame {
   ImageDescriptor imageDescriptor;
   OptionalColorTable colorTable;
-  CompressedImageData imageData;
-  explicit Frame(const ImageDescriptor &descriptor,
-                 const OptionalColorTable &colorTable,
-                 const CompressedImageData &data)
-      : imageDescriptor(descriptor), colorTable(colorTable), imageData(data){};
+  DecompressedImageData imageData;
 };
 
 using FrameData = std::variant<Frame, PlainTextExtension>;
@@ -186,19 +172,12 @@ struct ImageMetadata {
       : header(header), descriptor(descriptor), globalColorTable(table) {}
 };
 
-struct CompressedImage {
+struct Image {
   ImageMetadata metadata;
   std::vector<ImageBody> compressedImageData;
-  explicit CompressedImage(const ImageMetadata &meta,
-                           const std::vector<ImageBody> &body)
+  explicit Image(const ImageMetadata &meta, const std::vector<ImageBody> &body)
       : metadata(meta), compressedImageData(body) {}
 };
 
-struct DecompressedImage {
-  ImageMetadata metadata;
-  DecompressedImageData decompressedImageData;
-  explicit DecompressedImage(const ImageMetadata &);
-};
 }  // namespace gif
-
 std::ifstream readGifRaw(const std::string &);
